@@ -3,9 +3,9 @@
 Fun demo app that fetches recent stock aggregate data and generates a playful AI-written mini report. Built with:
 
 - Vite (frontend)
-- Cloudflare Worker (API proxy + AI gateway)
+- Cloudflare Pages Functions (serverless endpoints `/stocks` + `/ask`)
 - Polygon.io (market data) – optional, falls back to mock data when no key
-- OpenAI (chat completion via Cloudflare AI Gateway)
+- OpenAI (chat completion via Cloudflare AI Gateway / standard API)
 
 > DISCLAIMER: This project is for fun, education, and experimentation only. It is NOT financial advice, NOT a trading tool, and the generated content is intentionally whimsical. Do not use any output for real investment decisions.
 
@@ -13,8 +13,8 @@ Fun demo app that fetches recent stock aggregate data and generates a playful AI
 
 ## Features
 - Enter multiple stock tickers and generate a combined AI summary.
-- Cloudflare Worker endpoint for stock data (`/stocks`).
-- Cloudflare Worker endpoint for AI chat (`/ask`).
+- Cloudflare Pages Function for stock data (`POST /stocks`).
+- Cloudflare Pages Function for AI chat (`POST /ask`).
 - Graceful fallback to mock price data when Polygon API key missing.
 - Environment-based secrets kept out of version control.
 
@@ -22,7 +22,7 @@ Fun demo app that fetches recent stock aggregate data and generates a playful AI
 - Node.js 18+ (recommended LTS)
 - Polygon.io API key (optional; without it mock data is used)
 - OpenAI API key (for AI report) or configured Cloudflare AI Gateway key
-- Cloudflare account + Wrangler CLI (for deploying the Worker)
+- Cloudflare account (for Pages deployment)
 
 ## Installation
 ```bash
@@ -34,13 +34,13 @@ npm install
 ## Environment Variables
 Create a `.env` file at the project root (NOT committed) with:
 ```
-VITE_POLYGON_API_KEY=your_polygon_key_here   # optional
-VITE_OPENAI_API_KEY=your_openai_key_here     # frontend passes this to Worker
+VITE_POLYGON_API_KEY=your_polygon_key_here   # optional (frontend fetches if present)
+VITE_OPENAI_API_KEY=your_openai_key_here     # used client-side ONLY in dev — prefer server secret
 ```
-For the Cloudflare Worker, set durable secrets / vars (do NOT hard code):
+In Cloudflare Pages project settings, add these Environment Variables (Production + Preview):
 ```
-wrangler secret put OPENAI_API_KEY
-wrangler secret put POLYGON_API_KEY    # optional
+POLYGON_API_KEY=your_polygon_key_here  (optional)
+OPENAI_API_KEY=your_openai_key_here
 ```
 
 Provide a public template for collaborators in `.env.example` (no secrets):
@@ -54,27 +54,25 @@ Start the Vite dev server:
 ```bash
 npm run dev
 ```
-It will open (or print) a localhost URL like `http://localhost:5173` (it may increment the port if busy).
+Pages Functions are not executed locally by default with plain Vite. For local testing of Functions you can:
+1. Use `npx @cloudflare/cli pages dev .` (or `wrangler pages dev`) to simulate Pages + Functions, OR
+2. Hit the deployed Pages preview environment for `/stocks` and `/ask`.
 
-In another terminal, run / develop the Worker (if you have a separate worker directory adjust path accordingly):
+Build for production:
 ```bash
-cd openai-api-worker
-wrangler dev
+npm run build
 ```
-
-Deploy Worker:
-```bash
-wrangler deploy
-```
+The output in `dist/` is what Cloudflare Pages will serve; Functions in `functions/` deploy automatically.
 
 ## Frontend Flow
 1. User enters tickers & clicks generate.
-2. Frontend fetches Polygon aggregate data (or mock) directly.
-3. Data string sent to Worker `/ask` endpoint as chat messages.
-4. Worker calls OpenAI via Cloudflare Gateway and returns structured JSON `{ role, content }`.
-5. Frontend renders the `content` in the report box.
+2. Frontend sends POST to `/stocks` (Pages Function) with tickers + date range.
+3. Function fetches Polygon (or returns mock) data.
+4. Frontend builds a condensed string and POSTs to `/ask` with `messages`.
+5. Function calls OpenAI and returns `{ role, content }`.
+6. Frontend renders the AI `content`.
 
-## API Endpoints (Worker)
+## API Endpoints (Pages Functions)
 `POST /stocks`
 Request JSON:
 ```json
@@ -95,16 +93,13 @@ Response JSON:
 { "role": "assistant", "content": "Generated report text" }
 ```
 
-If you hit the root `/` you will get:
-```json
-{ "message": "Dodgy Dave's API is running!" }
-```
+Static root serves the built SPA; Functions only run on their paths.
 
 ## Troubleshooting
-- Blank report: check browser console for `Worker response:` log.
-- `401` errors: verify OpenAI key (frontend `.env` and Worker secret if relying on `env.OPENAI_API_KEY`).
-- Polygon failures: without a key you’ll see mock data; supply a key to get real aggregates.
-- CORS: Worker sets permissive `Access-Control-Allow-*` headers.
+- Blank report: check console for `Worker response:` log (now Pages Function response).
+- `401` or auth errors: confirm `OPENAI_API_KEY` set in Pages env vars (and not exposed publicly in production builds).
+- Polygon failures: without `POLYGON_API_KEY` you’ll see mock data.
+- Local dev functions: use `wrangler pages dev` or deploy a preview.
 
 ## Security Notes
 - Never commit real API keys. `.gitignore` already excludes `.env`.
