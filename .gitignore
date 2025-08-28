@@ -1,0 +1,61 @@
+############################
+# Dependencies
+############################
+node_modules/
+
+############################
+# Production / build output
+############################
+dist/
+build/
+
+############################
+# Vite / tooling caches
+############################
+.vite/
+.eslintcache
+
+############################
+# Cloudflare Workers (wrangler local state)
+############################
+.wrangler/
+
+############################
+# Environment & secrets (commit only an example like .env.example)
+############################
+.env
+.env.local
+.env.*.local
+
+############################
+# Logs
+############################
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+############################
+# Test / coverage
+############################
+coverage/
+
+############################
+# Archives / packages
+############################
+*.tgz
+
+############################
+# Editors / OS
+############################
+.DS_Store
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+
+############################
+# Misc
+############################
+*.orig
