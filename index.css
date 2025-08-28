@@ -142,6 +142,40 @@ input[type="text"] {
     font-size: 105%;
 }
 
+/* Responsive adjustments */
+@media (max-width: 840px) {
+    main {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 0 1rem 2rem;
+    }
+    header img {
+        width: 70%;
+        max-width: 280px;
+    }
+    .action-panel, .output-panel, .loading-panel {
+        margin: 1rem 0;
+        width: 100%;
+        max-width: 100%;
+        height: auto;
+    }
+    form { width: 100%; }
+    .form-input-control, .generate-report-btn { width: 100%; }
+    input[type="text"] { flex: 1; }
+    .output-panel { padding: 1rem; }
+    h2 { margin-top: 0; }
+}
+
+@media (max-width: 480px) {
+    body { font-size: 15px; }
+    header { padding: .75rem 0; }
+    header img { width: 65%; max-width: 220px; }
+    label { font-size: 14px; }
+    .generate-report-btn { font-size: 95%; padding: .85em 1em; }
+    .add-ticker-btn { padding: 0 .6em; }
+    .output-panel p { max-height: 300px; }
+}
+
 /* ticker display (ensure comma separated) */
 
 .ticker {
