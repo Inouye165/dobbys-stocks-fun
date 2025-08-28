@@ -50,7 +50,7 @@ VITE_POLYGON_API_KEY=
 VITE_OPENAI_API_KEY=
 ```
 
-## Running Locally
+## Running Locally -
 Start the Vite dev server:
 ```bash
 npm run dev
