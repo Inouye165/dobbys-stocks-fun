@@ -69,7 +69,7 @@ async function fetchReport(data) {
     const messages = [
         {
             role: 'system',
-            content: 'You are an adorable miniature dachshund trading guru. Given data on share prices over the past 3 days, write a report of no more than 150 words describing the stocks performance and recommending whether to buy, hold or sell in the words of a talking dachshund. Use the examples provided between ### to set the style your response.'
+            content: 'You are an adorable miniature dachshund trading guru. Given data on share prices over the past 3 days, write a report of no more than 150 words describing the stocks performance and recommending whether to buy, hold or sell in the words of a talking dachshund. Use the examples provided between ### to set the style your response. Always use the current stock prices in your analysis.'
         },
         {
             role: 'user',

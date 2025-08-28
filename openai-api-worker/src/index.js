@@ -1,122 +1,237 @@
+// worker.js
+// Cloudflare Worker: Stocks helper + Chat proxy
+
+import OpenAI from "openai";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type"
 };
-import OpenAI from "openai";
+
+// Strong anti-cache headers for “live” responses
+const noCacheJSON = {
+  ...corsHeaders,
+  "Content-Type": "application/json",
+  "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
+};
+
+// Flip this to true if you want fake data when POLYGON_API_KEY is missing (dev only)
+const ALLOW_DEV_MOCKS = false;
+
+// Simple helper to JSON responses
+const jres = (obj, init = {}) =>
+  new Response(JSON.stringify(obj), { headers: noCacheJSON, ...init });
+
+// Market status helper (optional but handy in UI)
+async function getMarketStatus(apiKey) {
+  try {
+    const r = await fetch(
+      `https://api.polygon.io/v1/marketstatus/now?apiKey=${apiKey}&_=${Date.now()}`
+    );
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
+  }
+}
+
+// Fetch last price via snapshot, fallback to last trade
+async function fetchLivePrice(ticker, apiKey) {
+  const t = encodeURIComponent(ticker.toUpperCase().trim());
+  // 1) Snapshot (contains lastTrade + today/minute/day)
+  const snap = await fetch(
+    `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${t}?apiKey=${apiKey}&_=${Date.now()}`
+  );
+  let data = await snap.json();
+  if (snap.ok && data?.ticker?.lastTrade?.p != null) {
+    const lt = data.ticker.lastTrade; // {p, t, ...}
+    return {
+      ok: true,
+      source: "snapshot",
+      price: lt.p,
+      asOf: lt.t,
+      raw: {
+        day: data.ticker.day || null,
+        minute: data.ticker.min || null
+      }
+    };
+  }
+
+  // 2) Fallback: last trade endpoint
+  const ltResp = await fetch(
+    `https://api.polygon.io/v2/last/trade/${t}?apiKey=${apiKey}&_=${Date.now()}`
+  );
+  data = await ltResp.json();
+  if (ltResp.ok && data?.results?.p != null) {
+    return {
+      ok: true,
+      source: "last-trade",
+      price: data.results.p,
+      asOf: data.results.t,
+      raw: null
+    };
+  }
+
+  return { ok: false, error: data?.error || `HTTP ${ltResp.status}` };
+}
+
+// Fetch adjusted daily bars for a date range
+async function fetchDailyRange(ticker, startDate, endDate, apiKey) {
+  const t = encodeURIComponent(ticker.toUpperCase().trim());
+  const url =
+    `https://api.polygon.io/v2/aggs/ticker/${t}/range/1/day/` +
+    `${encodeURIComponent(startDate)}/${encodeURIComponent(endDate)}` +
+    `?adjusted=true&sort=asc&limit=5000&apiKey=${apiKey}`;
+
+  const resp = await fetch(url);
+  const data = await resp.json();
+
+  if (!resp.ok) {
+    return { ok: false, status: resp.status, error: data?.error || `HTTP ${resp.status}` };
+  }
+
+  // Clean non-deterministic fields (nice-to-have for cache stability)
+  delete data.request_id;
+  delete data.next_url;
+  delete data.count;
+  if (Array.isArray(data.results)) {
+    for (const r of data.results) {
+      if (r && typeof r === "object") {
+        delete r.request_id;
+        delete r.id;
+      }
+    }
+  }
+
+  const lastBar = Array.isArray(data.results) && data.results.length
+    ? data.results[data.results.length - 1]
+    : null;
+
+  return {
+    ok: true,
+    status: 200,
+    data,
+    meta: {
+      latestClose: lastBar?.c ?? null,
+      latestCloseTime: lastBar?.t ?? null
+    }
+  };
+}
+
+// Optional: prevent the LLM endpoint from answering price questions
+function looksLikePriceQuestion(messages) {
+  const text = (messages || [])
+    .map(m => (typeof m.content === "string" ? m.content : ""))
+    .join(" ")
+    .toLowerCase();
+  return /\b(price|quote|how much is|what is.*trading at|stock.*now|current.*price)\b/.test(text);
+}
 
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders });
     }
+
     const url = new URL(request.url);
+
+    // ------------------ /price ------------------
+    if (url.pathname === "/price" && request.method === "POST") {
+      try {
+        const { ticker } = await request.json();
+        if (!ticker) return jres({ ok: false, error: "ticker required" }, { status: 400 });
+
+        if (!env.POLYGON_API_KEY) {
+          if (ALLOW_DEV_MOCKS) {
+            return jres({
+              ok: true,
+              ticker,
+              price: 100 + Math.random() * 50,
+              asOf: Date.now(),
+              meta: { source: "mock", market: null }
+            });
+          }
+          return jres({ ok: false, error: "Missing POLYGON_API_KEY" }, { status: 401 });
+        }
+
+        const [market, live] = await Promise.all([
+          getMarketStatus(env.POLYGON_API_KEY),
+          fetchLivePrice(ticker, env.POLYGON_API_KEY)
+        ]);
+
+        if (!live.ok) {
+          return jres({ ok: false, ticker, error: live.error || "Unable to fetch price", meta: { market } }, { status: 502 });
+        }
+
+        return jres({
+          ok: true,
+          ticker: ticker.toUpperCase().trim(),
+          price: live.price,
+          asOf: live.asOf, // epoch millis from Polygon
+          meta: { source: live.source, market, snapshot: live.raw }
+        });
+      } catch (err) {
+        return jres({ ok: false, error: err.message }, { status: 500 });
+      }
+    }
+
     // ------------------ /stocks ------------------
     if (url.pathname === "/stocks" && request.method === "POST") {
       try {
         const { tickers, startDate, endDate } = await request.json();
-        
         if (!Array.isArray(tickers) || !tickers.length || !startDate || !endDate) {
-          return new Response(JSON.stringify({ ok: false, error: "tickers[], startDate, and endDate are required" }), 
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          return jres({ ok: false, error: "tickers[], startDate, and endDate are required" }, { status: 400 });
         }
 
-        const results = await Promise.all(tickers.map(async (ticker) => {
-          const t = ticker.toUpperCase().trim();
-          
-          // Check if Polygon API key is available
-          if (!env.POLYGON_API_KEY) {
-            // Return mock data when API key is not available
-            const mockPrices = {
-              'MSFT': { current: 412.50, change: 2.34 },
-              'AAPL': { current: 189.75, change: -1.25 },
-              'GOOGL': { current: 142.30, change: 0.87 },
-              'TSLA': { current: 248.90, change: -5.67 },
-              'NVDA': { current: 875.20, change: 12.45 },
-              'AMZN': { current: 178.65, change: 3.21 },
-              'META': { current: 298.45, change: 4.12 },
-              'NFLX': { current: 445.80, change: -2.34 }
-            };
-            
-            const mockPrice = mockPrices[t] || { current: 100 + Math.random() * 200, change: (Math.random() - 0.5) * 20 };
-            const oldPrice = mockPrice.current - mockPrice.change;
-            
-            return {
-              ticker: t,
+        if (!env.POLYGON_API_KEY) {
+          if (ALLOW_DEV_MOCKS) {
+            const now = Date.now();
+            const results = tickers.map(t => ({
+              ticker: t.toUpperCase().trim(),
               status: 200,
               data: {
-                ticker: t,
+                ticker: t.toUpperCase().trim(),
                 results: [
-                  { c: oldPrice, t: Date.now() - 30 * 24 * 60 * 60 * 1000 },
-                  { c: mockPrice.current, t: Date.now() }
+                  { c: 100, t: now - 86400000 * 2 },
+                  { c: 105, t: now - 86400000 },
+                  { c: 107, t: now }
                 ],
-                resultsCount: 2,
+                resultsCount: 3,
                 status: "OK"
               },
-              error: null
-            };
+              error: null,
+              meta: { latestClose: 107, latestCloseTime: now }
+            }));
+            return jres({ ok: true, results, meta: { startDate, endDate }, errors: [] });
           }
-          
-          try {
-            const polygonUrl = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(t)}/range/1/day/${encodeURIComponent(startDate)}/${encodeURIComponent(endDate)}?apiKey=${env.POLYGON_API_KEY}`;
-            const resp = await fetch(polygonUrl);
-            const data = await resp.json();
-            
-            // Clean the data for better caching by removing unique identifiers
-            if (resp.status === 200 && data && typeof data === "object") {
-              // Remove Polygon.io unique identifiers that break caching
-              delete data.request_id;
-              delete data.next_url;
-              delete data.count; // This can vary slightly
-              
-              // Clean any nested objects that might have unique IDs
-              if (data.results && Array.isArray(data.results)) {
-                data.results.forEach(result => {
-                  if (result && typeof result === "object") {
-                    delete result.request_id;
-                    delete result.id;
-                  }
-                });
-              }
-            }
-            
-            return {
-              ticker: t,
-              status: resp.status,
-              data: resp.status === 200 ? data : null,
-              error: resp.status !== 200 ? (data?.error || `HTTP ${resp.status}`) : null
-            };
-          } catch (error) {
-            return {
-              ticker: t,
-              status: 500,
-              data: null,
-              error: error.message
-            };
-          }
-        }));
-
-        const successes = results.filter(r => r.status === 200 && r.data);
-        const failures = results.filter(r => r.status !== 200 || r.error);
-
-        if (successes.length === 0) {
-          return new Response(JSON.stringify({ 
-            ok: false, 
-            results, 
-            errors: failures.map(f => ({ ticker: f.ticker, error: f.error })) 
-          }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          return jres({ ok: false, error: "Missing POLYGON_API_KEY" }, { status: 401 });
         }
 
-        return new Response(JSON.stringify({
+        const results = await Promise.all(
+          tickers.map(async (ticker) => {
+            try {
+              const r = await fetchDailyRange(ticker, startDate, endDate, env.POLYGON_API_KEY);
+              return { ticker: ticker.toUpperCase().trim(), ...r, error: r.ok ? null : r.error };
+            } catch (e) {
+              return { ticker: ticker.toUpperCase().trim(), ok: false, status: 500, data: null, error: e.message };
+            }
+          })
+        );
+
+        const successes = results.filter(r => r.ok);
+        if (!successes.length) {
+          return jres({ ok: false, results, errors: results.map(r => ({ ticker: r.ticker, error: r.error })) }, { status: 502 });
+        }
+
+        return jres({
           ok: true,
           results,
           meta: { startDate, endDate },
-          errors: failures.map(f => ({ ticker: f.ticker, error: f.error }))
-        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-
-      } catch (error) {
-        return new Response(JSON.stringify({ ok: false, error: error.message }), 
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          errors: results.filter(r => !r.ok).map(r => ({ ticker: r.ticker, error: r.error }))
+        });
+      } catch (err) {
+        return jres({ ok: false, error: err.message }, { status: 500 });
       }
     }
 
@@ -126,9 +241,16 @@ export default {
         const body = await request.json();
         const { messages, temperature = 1.0, apiKey } = body;
 
-        if (!messages || !Array.isArray(messages)) {
-          return new Response(JSON.stringify({ ok: false, error: "messages[] required" }), 
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        if (!Array.isArray(messages)) {
+          return jres({ ok: false, error: "messages[] required" }, { status: 400 });
+        }
+
+        // Light guard: avoid using LLM for price quotes
+        if (looksLikePriceQuestion(messages)) {
+          return jres({
+            ok: false,
+            error: "Use /price (for live) or /stocks (for history) for market data."
+          }, { status: 400 });
         }
 
         const openai = new OpenAI({
@@ -136,7 +258,7 @@ export default {
           baseURL: "https://gateway.ai.cloudflare.com/v1/1f7a2cc17e7193d1cf7a1a3b30d84536/stock-predict/openai"
         });
 
-        const chatCompletion = await openai.chat.completions.create({
+        const chat = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages,
           temperature,
@@ -145,23 +267,17 @@ export default {
         });
 
         const response = {
-          role: chatCompletion.choices?.[0]?.message?.role || "assistant",
-          content: chatCompletion.choices?.[0]?.message?.content || ""
+          role: chat.choices?.[0]?.message?.role || "assistant",
+          content: chat.choices?.[0]?.message?.content || ""
         };
 
-        return new Response(JSON.stringify(response), { 
-          headers: { ...corsHeaders, "Content-Type": "application/json" } 
-        });
-
-      } catch (error) {
-        return new Response(JSON.stringify({ ok: false, error: error.message }), 
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return jres(response);
+      } catch (err) {
+        return jres({ ok: false, error: err.message }, { status: 500 });
       }
     }
 
-    // ------------------ Default route ------------------
-    return new Response(JSON.stringify({ message: "Dodgy Dave's API is running!" }), { 
-      headers: { ...corsHeaders, "Content-Type": "application/json" } 
-    });
-  },
+    // ------------------ Default ------------------
+    return jres({ message: "Dodgy Dave's API is running!" });
+  }
 };
