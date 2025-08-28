@@ -88,6 +88,7 @@ async function fetchDailyRange(ticker, startDate, endDate, apiKey) {
   const data = await resp.json();
 
   if (!resp.ok) {
+    console.error(`[Polygon] Error for ${ticker}:`, data?.error || `HTTP ${resp.status}`);
     return { ok: false, status: resp.status, error: data?.error || `HTTP ${resp.status}` };
   }
 
@@ -104,9 +105,22 @@ async function fetchDailyRange(ticker, startDate, endDate, apiKey) {
     }
   }
 
-  const lastBar = Array.isArray(data.results) && data.results.length
-    ? data.results[data.results.length - 1]
-    : null;
+  // Debug: log results for GOOGL and empty results
+  if (ticker.toUpperCase().trim() === "GOOGL") {
+    console.log(`[Polygon] GOOGL results:`, JSON.stringify(data.results));
+  }
+  if (!Array.isArray(data.results) || !data.results.length) {
+    console.warn(`[Polygon] No results for ${ticker}. Raw response:`, JSON.stringify(data));
+    return {
+      ok: false,
+      status: 200,
+      data,
+      error: `No price data returned for ${ticker}`,
+      meta: { latestClose: null, latestCloseTime: null }
+    };
+  }
+
+  const lastBar = data.results[data.results.length - 1];
 
   return {
     ok: true,
@@ -212,8 +226,12 @@ export default {
           tickers.map(async (ticker) => {
             try {
               const r = await fetchDailyRange(ticker, startDate, endDate, env.POLYGON_API_KEY);
+              if (!r.ok) {
+                console.warn(`[Worker] No valid data for ${ticker}:`, r.error);
+              }
               return { ticker: ticker.toUpperCase().trim(), ...r, error: r.ok ? null : r.error };
             } catch (e) {
+              console.error(`[Worker] Exception for ${ticker}:`, e.message);
               return { ticker: ticker.toUpperCase().trim(), ok: false, status: 500, data: null, error: e.message };
             }
           })
@@ -221,8 +239,18 @@ export default {
 
         const successes = results.filter(r => r.ok);
         if (!successes.length) {
+          console.error(`[Worker] All tickers failed. Results:`, JSON.stringify(results));
           return jres({ ok: false, results, errors: results.map(r => ({ ticker: r.ticker, error: r.error })) }, { status: 502 });
         }
+
+        // Debug: log summary of results
+        results.forEach(r => {
+          if (!r.ok) {
+            console.warn(`[Worker] Ticker ${r.ticker} failed:`, r.error);
+          } else {
+            console.log(`[Worker] Ticker ${r.ticker} success. Latest close:`, r.meta.latestClose);
+          }
+        });
 
         return jres({
           ok: true,
