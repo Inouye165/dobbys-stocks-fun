@@ -46,19 +46,19 @@ async function fetchStockData() {
     document.querySelector('.action-panel').style.display = 'none'
     loadingArea.style.display = 'flex'
     try {
-        const stockData = await Promise.all(tickersArr.map(async (ticker) => {
-            const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(ticker)}/range/1/day/` +
-                  `${encodeURIComponent(dates.startDate)}/${encodeURIComponent(dates.endDate)}?apiKey=${import.meta.env.VITE_POLYGON_API_KEY}`;
-
-            const response = await fetch(url)
-            if (!response.ok) {
-                const errMsg = await response.text()
-                throw new Error('Worker error: ' + errMsg)
-            }
-            apiMessage.innerText = 'Creating report...'
-            return response.text()
-        }))
-        fetchReport(stockData.join(''))
+        const resp = await fetch('/stocks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tickers: tickersArr, startDate: dates.startDate, endDate: dates.endDate })
+        });
+        const json = await resp.json();
+        if (!resp.ok || !json.ok) {
+            throw new Error(json.error || 'Stocks endpoint failed');
+        }
+        apiMessage.innerText = 'Creating report...'
+        // Build a concise string of closes
+        const dataStr = json.results.map(r => `${r.ticker}: ${JSON.stringify(r.data || r)}`).join('\n');
+        fetchReport(dataStr)
     } catch (err) {
         loadingArea.innerText = 'There was an error fetching stock data.'
         console.error(err.message)
@@ -89,7 +89,7 @@ async function fetchReport(data) {
         };
     
     try {
-    const url = 'https://openai-api-worker.inouye165.workers.dev/ask'
+    const url = '/ask'
         
         const response = await fetch(url, {
             method: 'POST',
