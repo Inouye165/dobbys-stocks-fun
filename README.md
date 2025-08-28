@@ -22,7 +22,7 @@ Fun demo app that fetches recent stock aggregate data and generates a playful AI
 - Node.js 18+ (recommended LTS)
 - Polygon.io API key (optional; without it mock data is used)
 - OpenAI API key (for AI report) or configured Cloudflare AI Gateway key
-- Cloudflare account (for Pages deployment)
+- Cloudflare account (for Pages deployment).
 
 ## Installation
 ```bash
@@ -45,6 +45,7 @@ OPENAI_API_KEY=your_openai_key_here
 
 Provide a public template for collaborators in `.env.example` (no secrets):
 ```
+
 VITE_POLYGON_API_KEY=
 VITE_OPENAI_API_KEY=
 ```
