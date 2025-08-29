@@ -13,6 +13,7 @@ export async function onRequestPost({ request, env }) {
       const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(ticker)}/range/1/day/${encodeURIComponent(startDate)}/${encodeURIComponent(endDate)}?apiKey=${apiKey}`;
       const resp = await fetch(url);
       const data = await resp.json();
+      delete data.request_id; // Remove unique ID for consistent caching
       return { ticker, status: resp.status, data };
     }));
     return new Response(JSON.stringify({ ok: true, results }), { headers: { 'Content-Type':'application/json' } });
