@@ -16,7 +16,12 @@ export async function onRequestPost({ request, env }) {
       delete data.request_id; // Remove unique ID for consistent caching
       return { ticker, status: resp.status, data };
     }));
-    return new Response(JSON.stringify({ ok: true, results }), { headers: { 'Content-Type':'application/json' } });
+    return new Response(JSON.stringify({ ok: true, results }), { 
+      headers: { 
+        'Content-Type':'application/json',
+        'Cache-Control': 'public, max-age=300' // Cache for 5 minutes
+      } 
+    });
   } catch (e) {
     return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 500, headers: { 'Content-Type':'application/json' } });
   }
