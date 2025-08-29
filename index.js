@@ -1,4 +1,4 @@
-import { dates } from '/utils/dates'
+import { dates } from '/utils/dates.js'
 
 const tickersArr = []
 
@@ -82,13 +82,10 @@ async function fetchReport(data) {
             `
         }
     ]
-        const payload = {
-            messages,
-            apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-            temperature: 0.9
-        };
-    
-    try {
+    const payload = {
+        messages,
+        temperature: 0.9
+    };    try {
     const url = '/ask'
         
         const response = await fetch(url, {
