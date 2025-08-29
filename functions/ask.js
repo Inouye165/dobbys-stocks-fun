@@ -5,8 +5,8 @@ export async function onRequestPost({ request, env }) {
       return new Response(JSON.stringify({ ok: false, error: 'messages[] required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
-    if (!env.OPENAI_API_KEY) {
-      return new Response(JSON.stringify({ ok: false, error: 'OPENAI_API_KEY not configured' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    if (!env.CLOUDFLARE_API_TOKEN) {
+      return new Response(JSON.stringify({ ok: false, error: 'CLOUDFLARE_API_TOKEN not configured' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
     }
 
     const apiUrl = 'https://gateway.ai.cloudflare.com/v1/1f7a2cc17e7193d1cf7a1a3b30d84536/stock-predict/openai/v1/chat/completions';
@@ -21,7 +21,7 @@ export async function onRequestPost({ request, env }) {
     const resp = await fetch(apiUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+        'Authorization': `Bearer ${env.CLOUDFLARE_API_TOKEN}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(body)
