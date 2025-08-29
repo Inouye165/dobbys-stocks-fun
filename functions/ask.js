@@ -1,6 +1,6 @@
 export async function onRequestPost({ request, env }) {
   try {
-    const { messages, temperature = 0.9 } = await request.json();
+    const { messages, temperature = 0.0 } = await request.json();
     if (!messages || !Array.isArray(messages)) {
       return new Response(JSON.stringify({ ok: false, error: 'messages[] required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
@@ -9,7 +9,7 @@ export async function onRequestPost({ request, env }) {
       return new Response(JSON.stringify({ ok: false, error: 'OPENAI_API_KEY not configured' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
     }
 
-    const apiUrl = 'https://api.openai.com/v1/chat/completions';
+    const apiUrl = 'https://gateway.ai.cloudflare.com/v1/1f7a2cc17e7193d1cf7a3b30d84536/stock-predict/openai/v1/chat/completions';
     const body = {
       model: 'gpt-4o-mini',
       messages,
