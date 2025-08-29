@@ -306,6 +306,6 @@ export default {
     }
 
     // ------------------ Default ------------------
-    return jres({ message: "Dodgy Dave's API is running!" });
+    return jres({ message: "Dobby's API is running!" });
   }
 };

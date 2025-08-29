@@ -1,4 +1,4 @@
-## Dodgy Dave's Stock Predictions
+## Dobby's Stock Picks
 
 Fun demo app that fetches recent stock aggregate data and generates a playful AI-written mini report. Built with:
 
